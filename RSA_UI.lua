@@ -169,7 +169,7 @@ function RSA_CreateAlertFrame()
 	end
 end
 
-function RSA_ShowAlert(spellName, playerName, casterGUID, castDuration, spellID)
+function RSA_ShowAlert(spellName, playerName, casterGUID, castDuration, spellID, itemID)
 	if not RSA_AlertFrame then return end
 	if not RSA_AlertFrameEnabled then return end
 	
@@ -187,7 +187,6 @@ function RSA_ShowAlert(spellName, playerName, casterGUID, castDuration, spellID)
 	end
 	
 	local isFadeCheck = spellName and string.sub(spellName, -4) == "down"
-	-- castDuration kommt in Millisekunden von UNIT_CASTEVENT, muss also > 0 sein
 	local isNewCast = castDuration and tonumber(castDuration) and tonumber(castDuration) > 0 and not isFadeCheck
 	
 	local displayName = spellName
@@ -197,38 +196,28 @@ function RSA_ShowAlert(spellName, playerName, casterGUID, castDuration, spellID)
 		isFade = true
 	end
 	
-	-- Create unique key for this buff (GUID + spellName)
 	local buffKey = (casterGUID or "unknown") .. "_" .. displayName
 	
-	-- Handle fade event - remove from active buffs
 	if isFade then
 		RSA_AlertFrame.activeBuffs[buffKey] = nil
-		-- Show fade alert briefly, then switch to next buff
-		RSA_DisplayAlert(spellName, playerName, casterGUID, nil, spellID, true)
-		-- Don't return - let RSA_ShowNextBuff handle what to show next
+		RSA_DisplayAlert(spellName, playerName, casterGUID, nil, spellID, true, itemID)
 		RSA_ShowNextBuff()
 		return
 	end
 	
-	-- For casts, show immediately and interrupt any active display
-	if isNewCast then		
-		-- Casts take priority - show immediately
-		-- Clear any buff timer state to show the cast
+	if isNewCast then
 		RSA_AlertFrame.isBuffTimer = false
 		RSA_AlertFrame.currentBuffKey = nil
-		RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spellID, isTarget)
+		RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spellID, isTarget, itemID)
 		return
 	end
 	
-	-- Get buff duration
 	local buffDuration = nil
 	local hideTimer = false
 	
-	-- "Use" abilities (Kick, FlashBomb, etc.) get 3s display without timer
 	if spellID and RSA_USE_SPELL_IDS[spellID] then
 		buffDuration = 3
 		hideTimer = true
-	-- Buffs without known duration get 3s display without timer
 	elseif RSA_NO_TIMER_BUFFS and RSA_NO_TIMER_BUFFS[displayName] then
 		buffDuration = 3
 		hideTimer = true
@@ -238,19 +227,18 @@ function RSA_ShowAlert(spellName, playerName, casterGUID, castDuration, spellID)
 		buffDuration = RSA_BUFF_DURATIONS[displayName]
 	end
 	
-	-- For abilities without duration, use 3s default to ensure cleanup
 	if not buffDuration then
 		buffDuration = 3
 		hideTimer = true
 	end
 	
-	-- Always track buffs with duration (now all have one)
 	RSA_AlertFrame.activeBuffs[buffKey] = {
 		spellName = spellName,
 		displayName = displayName,
 		playerName = playerName,
 		casterGUID = casterGUID,
 		spellID = spellID,
+		itemID = itemID,
 		duration = buffDuration,
 		endTime = GetTime() + buffDuration,
 		isTarget = isTarget,
@@ -320,17 +308,8 @@ function RSA_DisplayBuffAlert(buff, remaining)
 	if not RSA_AlertFrame then return end
 	
 	-- Icon
-	local iconPath = "Interface\\Icons\\INV_Misc_QuestionMark"
-	if buff.spellID then
-		local spellIDNum = tonumber(buff.spellID)
-		if spellIDNum and RSA_ITEM_ICONS[spellIDNum] then
-			iconPath = RSA_ITEM_ICONS[spellIDNum]
-		elseif SpellInfo then
-			local _, _, icon = SpellInfo(buff.spellID)
-			if icon then iconPath = icon end
-		end
-		RSA_IconCache[buff.displayName] = iconPath
-	end
+	local iconPath = RSA_GetIcon(buff.spellID and tonumber(buff.spellID), buff.itemID)
+	RSA_IconCache[buff.displayName] = iconPath
 	RSA_AlertFrame.icon:SetTexture(iconPath)
 	
 	-- Text
@@ -376,7 +355,7 @@ function RSA_DisplayBuffAlert(buff, remaining)
 	RSA_AlertFrame.isTargetAlert = buff.isTarget
 end
 
-function RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spellID, isTarget)
+function RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spellID, isTarget, itemID)
 	if not RSA_AlertFrame then return end
 	
 	-- DEBUG
@@ -395,13 +374,7 @@ function RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spell
 	if isFade and RSA_IconCache[displayName] then
 		iconPath = RSA_IconCache[displayName]
 	elseif spellID then
-		local spellIDNum = tonumber(spellID)
-		if spellIDNum and RSA_ITEM_ICONS[spellIDNum] then
-			iconPath = RSA_ITEM_ICONS[spellIDNum]
-		elseif SpellInfo then
-			local _, _, icon = SpellInfo(spellID)
-			if icon then iconPath = icon end
-		end
+		iconPath = RSA_GetIcon(tonumber(spellID), itemID)
 		if not isFade then
 			RSA_IconCache[displayName] = iconPath
 		end
@@ -429,6 +402,7 @@ function RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spell
 	RSA_AlertFrame:SetWidth(frameWidth)
 	
 	RSA_AlertFrame.trackingGUID = casterGUID
+	RSA_AlertFrame.castSpellName = (castDuration and tonumber(castDuration) and tonumber(castDuration) > 0 and not isFade) and displayName or nil
 	local sliderAlpha = RSA_AlertFrameBgAlpha or 0.7
 	
 	if castDuration and tonumber(castDuration) and tonumber(castDuration) > 0 and not isFade then
@@ -469,6 +443,26 @@ function RSA_DisplayAlert(spellName, playerName, casterGUID, castDuration, spell
 		RSA_AlertFrame.bar:Show()
 	end
 	RSA_AlertFrame.isTargetAlert = isTarget
+end
+
+function RSA_CancelCast(casterGUID)
+  if not RSA_AlertFrame then return end
+  if not RSA_AlertFrame.isCasting then return end
+  if RSA_AlertFrame.trackingGUID ~= casterGUID then return end
+  RSA_AlertFrame.isCasting = false
+  RSA_AlertFrame.bar:SetWidth(0)
+  RSA_AlertFrame.timerText:SetText("")
+  -- Clear portrait icon for this cast
+  if RSA_AlertFrame.castSpellName and RSA_TrackedBuffs and RSA_TrackedBuffs[casterGUID] then
+    RSA_TrackedBuffs[casterGUID][RSA_AlertFrame.castSpellName] = nil
+    RSA_RefreshTargetPortrait()
+  end
+  -- If we have active buffs, show them instead of hiding
+  if RSA_AlertFrame.activeBuffs and next(RSA_AlertFrame.activeBuffs) then
+    RSA_ShowNextBuff()
+  elseif not RSA_MoveMode then
+    RSA_AlertFrame:Hide()
+  end
 end
 
 function RSA_ToggleMoveMode()
@@ -522,7 +516,7 @@ end
 
 RSA_TrackedBuffs = {}
 
-function RSA_UpdatePortraitIcon(spell, playerName, casterGUID, spellID)
+function RSA_UpdatePortraitIcon(spell, playerName, casterGUID, spellID, itemID)
 	if not casterGUID then return end
 	
 	local displayName = spell
@@ -539,16 +533,7 @@ function RSA_UpdatePortraitIcon(spell, playerName, casterGUID, spellID)
 	if isFade then
 		RSA_TrackedBuffs[casterGUID][displayName] = nil
 	else
-		local iconPath = "Interface\\Icons\\INV_Misc_QuestionMark"
-		if spellID then
-			local spellIDNum = tonumber(spellID)
-			if spellIDNum and RSA_ITEM_ICONS[spellIDNum] then
-				iconPath = RSA_ITEM_ICONS[spellIDNum]
-			elseif SpellInfo then
-				local _, _, icon = SpellInfo(spellID)
-				if icon then iconPath = icon end
-			end
-		end
+		local iconPath = RSA_GetIcon(spellID and tonumber(spellID), itemID)
 		
 		local duration = nil
 		local hideTimer = false

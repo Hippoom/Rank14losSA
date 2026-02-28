@@ -3,7 +3,7 @@ RSA_Core.lua - Core Functions, Config, Menu System
 Part of Rank14losSA addon
 ]]
 
-local RSA_VERSION = "0.5-SuperWoW-AlertFrame"
+local RSA_VERSION = "1.0-Nampower"
 
 --[[===========================================================================
 	Core Functions
@@ -32,19 +32,19 @@ function RSA_OnEvent(event)
 	if event == "PLAYER_ENTERING_WORLD" then
 		this:UnregisterEvent("PLAYER_ENTERING_WORLD")
 		
-		local hasSuperWoW = (GetPlayerBuffID ~= nil and CombatLogAdd ~= nil and SpellInfo ~= nil)
-		
-		if not hasSuperWoW then
+		local hasNamepower = (GetNampowerVersion ~= nil)
+
+		if not hasNamepower then
 			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000============================================|r")
-			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA] CRITICAL ERROR: SuperWoW NOT DETECTED!|r")
-			DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00This addon REQUIRES SuperWoW to function.|r")
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00https://github.com/balakethelock/SuperWoW|r")
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA] CRITICAL ERROR: Nampower NOT DETECTED!|r")
+			DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00This addon REQUIRES Nampower to function.|r")
+			DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00https://gitea.com/avitasia/nampower|r")
 			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000RSA addon has been DISABLED.|r")
 			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000============================================|r")
-			
+
 			SLASH_RSA1 = "/rsa"
 			SlashCmdList["RSA"] = function()
-				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r SuperWoW not detected!")
+				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r Nampower not detected!")
 			end
 			RSAMenuFrame:UnregisterAllEvents()
 			if RSAConfig then RSAConfig.enabled = false end
@@ -140,7 +140,7 @@ function RSA_OnEvent(event)
 			end
 		end
 		
-		RSA_SW:Initialize()
+		RSA_NP:Initialize()
 		InitializeDistanceCheck()
 		
 		if RSA_AlertFrameEnabled == nil then RSA_AlertFrameEnabled = true end
@@ -175,19 +175,19 @@ function RSA_UpdateState()
 end
 
 function RSA_Disable()
-	RSA_SW:Disable()
+	RSA_NP:Disable()
 end
 
 function RSA_Enable()
-	RSA_SW:Enable()
+	RSA_NP:Enable()
 end
 
-function RSA_PlaySoundFile(spell, playerName, casterGUID, castDuration, spellID)
-	RSA_ShowAlert(spell, playerName, casterGUID, castDuration, spellID)
-	RSA_UpdatePortraitIcon(spell, playerName, casterGUID, spellID)
+function RSA_PlaySoundFile(spell, playerName, casterGUID, castDuration, spellID, itemID)
+	RSA_ShowAlert(spell, playerName, casterGUID, castDuration, spellID, itemID)
+	RSA_UpdatePortraitIcon(spell, playerName, casterGUID, spellID, itemID)
 	
 	-- DEBUG OUTPUT
-	if RSA_SW and RSA_SW.debugMode then
+	if RSA_NP and RSA_NP.debugMode then
 		local isFade = string.sub(spell, -4) == "down"
 		local displayName = isFade and string.sub(spell, 1, -5) or spell
 		local eventType = "BUFF"
@@ -200,17 +200,15 @@ function RSA_PlaySoundFile(spell, playerName, casterGUID, castDuration, spellID)
 			eventType = "USE"
 		end
 		
-		-- Get spell name with rank from SpellInfo
-		local spellNameWithRank = displayName
-		if spellID and SpellInfo then
-			local name, rank = SpellInfo(spellID)
-			if name then
-				spellNameWithRank = name
-				if rank and rank ~= "" then
-					spellNameWithRank = spellNameWithRank .. "(" .. rank .. ")"
-				end
-			end
+	-- Get spell name with rank from SpellInfo/Nampower
+	local spellNameWithRank = displayName
+	if spellID then
+		local name = SpellInfo and SpellInfo(spellID)
+		if not name and GetSpellRecField then
+			name = GetSpellRecField(spellID, "spellName")
 		end
+		if name then spellNameWithRank = name end
+	end
 		
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff========== R14 Debug ==========|r")
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ffEvent Type:|r " .. eventType)
@@ -426,24 +424,23 @@ end
 SLASH_RSASTATUS1 = "/rsastatus"
 SlashCmdList["RSASTATUS"] = function()
 	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00========== RSA Status ==========|r")
-	
-	local hasSuperWoW = (GetPlayerBuffID ~= nil and CombatLogAdd ~= nil and SpellInfo ~= nil)
-	if hasSuperWoW then
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00SuperWoW:|r |cff00ff00AVAILABLE|r")
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Scanner:|r " .. (RSA_SW.enabled and "|cff00ff00ACTIVE|r" or "|cffff0000INACTIVE|r"))
+	if GetNampowerVersion then
+		local a, b, c = GetNampowerVersion()
+		DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00Nampower:|r v%d.%d.%d", a, b, c))
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Mode:|r " .. (pfUI and pfUI.libdebuff_spell_go_other_hooks and "pfUI hooks" or "Standalone"))
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Scanner:|r " .. (RSA_NP.enabled and "|cff00ff00ACTIVE|r" or "|cffff0000INACTIVE|r"))
 	else
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00SuperWoW:|r |cffff0000NOT AVAILABLE|r")
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Nampower:|r |cffff0000NOT AVAILABLE|r")
 	end
-	
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00RSA Enabled:|r " .. tostring(RSAConfig.enabled))
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Debug Mode:|r " .. (RSA_SW.debugMode and "|cffff00ffENABLED|r" or "DISABLED"))
+	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00RSA Enabled:|r " .. tostring(RSAConfig and RSAConfig.enabled))
+	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Debug Mode:|r " .. (RSA_NP.debugMode and "|cffff00ffENABLED|r" or "DISABLED"))
 	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00================================|r")
 end
 
 SLASH_R14DEBUG1 = "/r14debug"
 SlashCmdList["R14DEBUG"] = function()
-	RSA_SW.debugMode = not RSA_SW.debugMode
-	if RSA_SW.debugMode then
+	RSA_NP.debugMode = not RSA_NP.debugMode
+	if RSA_NP.debugMode then
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[R14 Debug]|r Debug mode |cff00ff00ENABLED|r")
 	else
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[R14 Debug]|r Debug mode |cffff0000DISABLED|r")

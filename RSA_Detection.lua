@@ -1,465 +1,385 @@
 --[[
-RSA_Detection.lua - SuperWoW Detection and Event Handling
+RSA_Detection.lua - Nampower Detection and Event Handling
 Part of Rank14losSA addon
+
+Replaces SuperWoW (UNIT_CASTEVENT + tooltip scanning) with:
+  - SPELL_GO_OTHER   → buff detection + item use detection
+  - SPELL_START_OTHER → cast detection (target = player)
+  - AURA_CAST_ON_OTHER → buff on friendly (debuff detection replacement)
+  - BUFF_REMOVED_OTHER → fade detection
+  - DEBUFF_ADDED_OTHER → debuff on friendly player
+  Requires NP_EnableSpellGoEvents=1
 ]]
 
-local strfind = string.find
-local strlower = string.lower
 local GetTime = GetTime
 
 -- Cooldown settings
-local COOLDOWN_BUFF = 2.0
+local COOLDOWN_BUFF  = 2.0
 local COOLDOWN_DEBUFF = 1.0
-local COOLDOWN_FADE = 3.0
-local COOLDOWN_USE = 0.5
+local COOLDOWN_FADE  = 3.0
+local COOLDOWN_USE   = 0.5
 
-local MAX_BUFFS = 32
-local MAX_DEBUFFS = 16
-
--- SuperWoW state
-RSA_SW = {
-	enabled = false,
-	debugMode = false,
-	inInstance = false,
-	trackedDebuffs = {},
-	lastAlerts = {},
-	fadeWatchList = {},
-	guids = {},
-	enemyGuids = {},
-	SCAN_INTERVAL = 0.5,
-	lastCleanup = 0,
-	CLEANUP_INTERVAL = 30,
+RSA_NP = {
+  enabled     = false,
+  debugMode   = false,
+  inInstance  = false,
+  lastAlerts  = {},
+  lastCleanup = 0,
+  CLEANUP_INTERVAL = 30,
 }
 
 --[[===========================================================================
-	Tooltip Scanner
+  Icon Helper
 =============================================================================]]
 
-local RSABuffScanner = CreateFrame("GameTooltip", "RSABuffScanner", nil, "GameTooltipTemplate")
-RSABuffScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
-
-local function ScanBuffName(unit, buffIndex)
-	RSABuffScanner:ClearLines()
-	RSABuffScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
-	RSABuffScanner:SetUnitBuff(unit, buffIndex)
-	local buffName = RSABuffScannerTextLeft1
-	if buffName and buffName:IsVisible() then
-		return buffName:GetText()
-	end
-	return nil
+local function GetIconPath(tex)
+  if not tex then return "Interface\\Icons\\INV_Misc_QuestionMark" end
+  if string.find(tex, "\\") then return tex end
+  return "Interface\\Icons\\" .. tex
 end
 
-local function ScanDebuffName(unit, debuffIndex)
-	RSABuffScanner:ClearLines()
-	RSABuffScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
-	RSABuffScanner:SetUnitDebuff(unit, debuffIndex)
-	local debuffName = RSABuffScannerTextLeft1
-	if debuffName and debuffName:IsVisible() then
-		return debuffName:GetText()
-	end
-	return nil
+local function GetSpellIcon(spellId)
+  if not spellId or not GetSpellRecField then return nil end
+  local iconId = GetSpellRecField(spellId, "spellIconID")
+  if not iconId then return nil end
+  local tex = GetSpellIconTexture(iconId)
+  return tex and GetIconPath(tex) or nil
+end
+
+local function GetItemIcon(itemId)
+  if not itemId or itemId == 0 then return nil end
+  if not GetItemStatsField then return nil end
+  local dispId = GetItemStatsField(itemId, "displayInfoID")
+  if not dispId then return nil end
+  local tex = GetItemIconTexture(dispId)
+  return tex and GetIconPath(tex) or nil
+end
+
+-- Returns best icon: item icon preferred for item-triggered casts, else spell icon
+function RSA_GetIcon(spellId, itemId)
+  if itemId and itemId ~= 0 then
+    local icon = GetItemIcon(itemId)
+    if icon then return icon end
+  end
+  return GetSpellIcon(spellId) or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 --[[===========================================================================
-	Helper Functions
-=============================================================================]]
-
-local function IsEnemy(guid)
-	if not UnitExists(guid) then return false end
-	if not UnitIsPlayer(guid) then return false end
-	local class = UnitClass(guid)
-	if not class then return false end
-	local classification = UnitClassification(guid)
-	if classification == "elite" or classification == "worldboss" or classification == "rare" or classification == "rareelite" then
-		return false
-	end
-	return UnitCanAttack("player", guid)
-end
-
-local function IsFriendly(guid)
-	if not UnitExists(guid) then return false end
-	if not UnitIsPlayer(guid) then return false end
-	local class = UnitClass(guid)
-	if not class then return false end
-	local classification = UnitClassification(guid)
-	if classification == "elite" or classification == "worldboss" or classification == "rare" or classification == "rareelite" then
-		return false
-	end
-	return not UnitCanAttack("player", guid)
-end
-
---[[===========================================================================
-	Distance Check
+  Distance Check (UnitXP)
 =============================================================================]]
 
 local UnitXP_GetDistance = nil
 local distanceCheckAvailable = false
 
 function InitializeDistanceCheck()
-	if UnitXP_GetDistance then return true end
-	if not UnitXP then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r UnitXP not found - Distance check DISABLED")
-		return false
-	end
-	
-	local success, result = pcall(function()
-		return UnitXP("distanceBetween", "player", "player")
-	end)
-	
-	if success and type(result) == "number" then
-		UnitXP_GetDistance = function(unit1, unit2)
-			return UnitXP("distanceBetween", unit1, unit2)
-		end
-		distanceCheckAvailable = true
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[RSA]|r UnitXP 'distanceBetween' detected - 50 yard range limit ACTIVE")
-		return true
-	end
-	
-	DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r UnitXP 'distanceBetween' not available")
-	return false
-end
-
-local function GetDistance(guid)
-	if not distanceCheckAvailable then return nil end
-	if not guid or not UnitExists(guid) then return nil end
-	local success, distance = pcall(function()
-		return UnitXP_GetDistance("player", guid)
-	end)
-	if success and distance then return distance end
-	return nil
+  if UnitXP_GetDistance then return true end
+  if not UnitXP then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r UnitXP not found - Distance check DISABLED")
+    return false
+  end
+  local success, result = pcall(function()
+    return UnitXP("distanceBetween", "player", "player")
+  end)
+  if success and type(result) == "number" then
+    UnitXP_GetDistance = function(unit1, unit2)
+      return UnitXP("distanceBetween", unit1, unit2)
+    end
+    distanceCheckAvailable = true
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[RSA]|r UnitXP distance check ACTIVE (50yd limit)")
+    return true
+  end
+  DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r UnitXP 'distanceBetween' not available")
+  return false
 end
 
 local function IsWithinRange(guid, maxYards)
-	if not distanceCheckAvailable then return false end
-	local distance = GetDistance(guid)
-	if not distance then return false end
-	return distance <= maxYards
+  if not distanceCheckAvailable then return true end  -- no check = always alert
+  if not guid or not UnitExists(guid) then return false end
+  local success, distance = pcall(function()
+    return UnitXP_GetDistance("player", guid)
+  end)
+  if success and distance then return distance <= maxYards end
+  return false
+end
+
+--[[===========================================================================
+  Helper Functions
+=============================================================================]]
+
+local function IsEnemy(guid)
+  if not UnitExists(guid) then return false end
+  if not UnitIsPlayer(guid) then return false end
+  local classification = UnitClassification(guid)
+  if classification == "elite" or classification == "worldboss"
+  or classification == "rare" or classification == "rareelite" then
+    return false
+  end
+  return UnitCanAttack("player", guid)
+end
+
+local function IsFriendly(guid)
+  if not UnitExists(guid) then return false end
+  if not UnitIsPlayer(guid) then return false end
+  local classification = UnitClassification(guid)
+  if classification == "elite" or classification == "worldboss"
+  or classification == "rare" or classification == "rareelite" then
+    return false
+  end
+  return not UnitCanAttack("player", guid)
 end
 
 local function CanAlert(guid, ability, alertType)
-	if not IsWithinRange(guid, 50) then return false end
-	if alertType == "cast" then return true end
-	
-	local now = GetTime()
-	if not RSA_SW.lastAlerts[guid] then
-		RSA_SW.lastAlerts[guid] = {}
-	end
-	
-	local lastAlert = RSA_SW.lastAlerts[guid][ability]
-	local cooldown = COOLDOWN_BUFF
-	if alertType == "use" then cooldown = COOLDOWN_USE
-	elseif alertType == "debuff" then cooldown = COOLDOWN_DEBUFF
-	elseif alertType == "fade" then cooldown = COOLDOWN_FADE
-	end
-	
-	if lastAlert and (now - lastAlert) < cooldown then return false end
-	RSA_SW.lastAlerts[guid][ability] = now
-	return true
+  if not IsWithinRange(guid, 50) then return false end
+  local now = GetTime()
+  if not RSA_NP.lastAlerts[guid] then
+    RSA_NP.lastAlerts[guid] = {}
+  end
+  local lastAlert = RSA_NP.lastAlerts[guid][ability]
+  local cooldown = COOLDOWN_BUFF
+  if alertType == "use"    then cooldown = COOLDOWN_USE
+  elseif alertType == "debuff" then cooldown = COOLDOWN_DEBUFF
+  elseif alertType == "fade"   then cooldown = COOLDOWN_FADE
+  end
+  if lastAlert and (now - lastAlert) < cooldown then return false end
+  RSA_NP.lastAlerts[guid][ability] = now
+  return true
 end
 
 --[[===========================================================================
-	Memory Cleanup
+  Memory Cleanup
 =============================================================================]]
 
-function RSA_SW:CleanupMemory()
-	local now = GetTime()
-	for guid, _ in pairs(self.fadeWatchList) do
-		if not UnitExists(guid) then
-			self.fadeWatchList[guid] = nil
-		end
-	end
-	for guid, abilities in pairs(self.lastAlerts) do
-		for ability, timestamp in pairs(abilities) do
-			if now - timestamp > 60 then
-				abilities[ability] = nil
-			end
-		end
-		if not next(abilities) then
-			self.lastAlerts[guid] = nil
-		end
-	end
-	self.lastCleanup = now
+function RSA_NP:CleanupMemory()
+  local now = GetTime()
+  for guid, abilities in pairs(self.lastAlerts) do
+    for ability, timestamp in pairs(abilities) do
+      if now - timestamp > 60 then
+        abilities[ability] = nil
+      end
+    end
+    if not next(abilities) then
+      self.lastAlerts[guid] = nil
+    end
+  end
+  self.lastCleanup = now
 end
 
 --[[===========================================================================
-	Instance Check
+  Instance Check
 =============================================================================]]
 
-function RSA_SW:UpdateInstanceStatus()
-	local inInstance, instanceType = IsInInstance()
-	local zone = GetZoneText()
-	local isWinterVeilVale = (zone == "Winter Veil Vale")
-	
-	if inInstance and not isWinterVeilVale and (instanceType == "party" or instanceType == "raid") then
-		if not self.inInstance then
-			self.inInstance = true
-			self.fadeWatchList = {}
-			self.enemyGuids = {}
-			self.guids = {}
-			self.trackedDebuffs = {}
-		end
-	else
-		if self.inInstance then
-			self.inInstance = false
-		end
-	end
+function RSA_NP:UpdateInstanceStatus()
+  local inInstance, instanceType = IsInInstance()
+  local zone = GetZoneText()
+  local isWinterVeilVale = (zone == "Winter Veil Vale")
+  if inInstance and not isWinterVeilVale
+  and (instanceType == "party" or instanceType == "raid") then
+    self.inInstance = true
+  else
+    self.inInstance = false
+  end
 end
 
 --[[===========================================================================
-	Debuff Scanner
+  Alert trigger
 =============================================================================]]
 
-function RSA_SW:ScanDebuffs(guid)
-	if not UnitExists(guid) then
-		self.trackedDebuffs[guid] = nil
-		return
-	end
-	if not IsFriendly(guid) then return end
-	
-	local currentDebuffs = {}
-	local playerName = UnitName(guid) or "Unknown"
-	
-	for i = 1, MAX_DEBUFFS do
-		local debuffName = ScanDebuffName(guid, i)
-		if debuffName then
-			local nameLower = strlower(debuffName)
-			local configKey = RSA_DEBUFF_NAMES[nameLower]
-			if configKey then
-				currentDebuffs[configKey] = true
-				if not self.trackedDebuffs[guid] or not self.trackedDebuffs[guid][configKey] then
-					if RSAConfig.debuffs.enabled and RSAConfig.debuffs[configKey] and CanAlert(guid, configKey, "debuff") then
-						RSA_PlaySoundFile(configKey, playerName, guid)
-					end
-				end
-			end
-		end
-	end
-	self.trackedDebuffs[guid] = currentDebuffs
+local function FireAlert(configKey, casterGuid, spellId, itemId, castDuration)
+  local casterName = UnitName(casterGuid) or "Unknown"
+  RSA_PlaySoundFile(configKey, casterName, casterGuid, castDuration, spellId, itemId)
+end
+
+-- Active cast tracking: casterGuid -> spellId (set on SPELL_START_OTHER, cleared on SPELL_GO_OTHER or SPELL_FAILED_OTHER)
+local activeCasts = {}
+
+--[[===========================================================================
+  SPELL_GO_OTHER → Buffs + Item Uses
+=============================================================================]]
+
+local function OnSpellGoOther(spellId, itemId, casterGuid, targetGuid)
+  -- Clear active cast
+  activeCasts[casterGuid] = nil
+
+  if RSA_NP.inInstance then return end
+  if not spellId or not casterGuid then return end
+  if not UnitIsPlayer(casterGuid) then return end
+
+  local now = GetTime()
+  if now - RSA_NP.lastCleanup > RSA_NP.CLEANUP_INTERVAL then
+    RSA_NP:CleanupMemory()
+  end
+
+  -- Item use detection (itemId != 0)
+  if itemId and itemId ~= 0 then
+    local useConfigKey = RSA_USE_ITEM_IDS and RSA_USE_ITEM_IDS[itemId]
+    if useConfigKey then
+      if IsEnemy(casterGuid) and RSAConfig.use
+      and RSAConfig.use.enabled and RSAConfig.use[useConfigKey]
+      and CanAlert(casterGuid, useConfigKey, "use") then
+        FireAlert(useConfigKey, casterGuid, spellId, itemId, nil)
+      end
+      return
+    end
+  end
+
+  -- Buff detection via spellId
+  local buffConfigKey = RSA_BUFF_SPELL_IDS[spellId]
+  if buffConfigKey then
+    if IsEnemy(casterGuid) and RSAConfig.buffs
+    and RSAConfig.buffs.enabled and RSAConfig.buffs[buffConfigKey]
+    and CanAlert(casterGuid, buffConfigKey, "buff") then
+      FireAlert(buffConfigKey, casterGuid, spellId, itemId, nil)
+    end
+    return
+  end
+
+  -- Ability use detection via spellId (instant abilities, interrupts etc.)
+  local useConfigKey = RSA_USE_SPELL_IDS[spellId]
+  if useConfigKey then
+    if IsEnemy(casterGuid) and RSAConfig.use
+    and RSAConfig.use.enabled and RSAConfig.use[useConfigKey]
+    and CanAlert(casterGuid, useConfigKey, "use") then
+      FireAlert(useConfigKey, casterGuid, spellId, itemId, nil)
+    end
+    return
+  end
 end
 
 --[[===========================================================================
-	Scanning Loop
+  SPELL_START_OTHER → Cast detection (only if targeting player)
 =============================================================================]]
 
-local scanFrame = CreateFrame("Frame")
-local scanTimer = 0
+local function OnSpellStartOther(spellId, casterGuid, targetGuid, castTime)
+  -- Track active cast
+  if casterGuid and spellId then
+    activeCasts[casterGuid] = spellId
+  end
 
-scanFrame:SetScript("OnUpdate", function()
-	if not RSA_SW.enabled then return end
-	if not RSAConfig or not RSAConfig.enabled then return end
-	if RSA_SW.inInstance then return end
-	
-	scanTimer = scanTimer + arg1
-	if scanTimer < RSA_SW.SCAN_INTERVAL then return end
-	scanTimer = 0
-	
-	local now = GetTime()
-	if now - RSA_SW.lastCleanup > RSA_SW.CLEANUP_INTERVAL then
-		RSA_SW:CleanupMemory()
-	end
-	
-	-- Scan fade watch list
-	for guid, buffList in pairs(RSA_SW.fadeWatchList) do
-		if UnitExists(guid) then
-			-- Get all current buffs on target
-			local currentBuffs = {}
-			for i = 1, 32 do
-				local buffName = ScanBuffName(guid, i)
-				if buffName then
-					currentBuffs[strlower(buffName)] = true
-				end
-			end
-			
-			-- Check each watched buff
-			for configKey, watchData in pairs(buffList) do
-				local buffFound = false
-				for buffNameLower, _ in pairs(currentBuffs) do
-					if strfind(buffNameLower, watchData.pattern) then
-						buffFound = true
-						break
-					end
-				end
-				if not buffFound then
-					local fadeKey = configKey .. "_fade"
-					if CanAlert(guid, fadeKey, "fade") then
-						RSA_PlaySoundFile(configKey .. "down", watchData.playerName, guid)
-					end
-					buffList[configKey] = nil
-				end
-			end
-			
-			-- Clean up empty entries
-			local hasBuffs = false
-			for _, _ in pairs(buffList) do
-				hasBuffs = true
-				break
-			end
-			if not hasBuffs then
-				RSA_SW.fadeWatchList[guid] = nil
-			end
-		else
-			RSA_SW.fadeWatchList[guid] = nil
-		end
-	end
-	
-	-- Scan player debuffs
-	if RSAConfig.debuffs and RSAConfig.debuffs.enabled then
-		local _, playerGuid = UnitExists("player")
-		if playerGuid then
-			RSA_SW:ScanDebuffs(playerGuid)
-		end
-	end
+  if RSA_NP.inInstance then return end
+  if not spellId or not casterGuid then return end
+  if not IsEnemy(casterGuid) then return end
+
+  local _, playerGuid = UnitExists("player")
+  if targetGuid ~= playerGuid then return end
+
+  local castConfigKey = RSA_CAST_SPELL_IDS[spellId]
+  if not castConfigKey then return end
+  if not RSAConfig.casts or not RSAConfig.casts.enabled then return end
+  if not RSAConfig.casts[castConfigKey] then return end
+
+  FireAlert(castConfigKey, casterGuid, spellId, nil, castTime)
+end
+
+--[[===========================================================================
+  BUFF_REMOVED_OTHER → Fade detection
+=============================================================================]]
+
+local function OnBuffRemovedOther(guid, spellId)
+  if RSA_NP.inInstance then return end
+  if not IsEnemy(guid) then return end
+  if not spellId then return end
+
+  local buffConfigKey = RSA_BUFF_SPELL_IDS[spellId]
+  if not buffConfigKey then return end
+  if not RSAConfig.fadingBuffs or not RSAConfig.fadingBuffs.enabled then return end
+  if not RSAConfig.fadingBuffs[buffConfigKey] then return end
+  if not CanAlert(guid, buffConfigKey .. "_fade", "fade") then return end
+
+  FireAlert(buffConfigKey .. "down", guid, spellId, nil, nil)
+end
+
+--[[===========================================================================
+  DEBUFF_ADDED_OTHER → Debuff on friendly player
+=============================================================================]]
+
+local function OnDebuffAddedOther(guid, luaSlot, spellId)
+  if RSA_NP.inInstance then return end
+  if not IsFriendly(guid) then return end
+  if not spellId then return end
+
+  local debuffConfigKey = RSA_DEBUFF_SPELL_IDS and RSA_DEBUFF_SPELL_IDS[spellId]
+  if not debuffConfigKey then return end
+  if not RSAConfig.debuffs or not RSAConfig.debuffs.enabled then return end
+  if not RSAConfig.debuffs[debuffConfigKey] then return end
+  if not CanAlert(guid, debuffConfigKey, "debuff") then return end
+
+  FireAlert(debuffConfigKey, guid, spellId, nil, nil)
+end
+
+--[[===========================================================================
+  SPELL_FAILED_OTHER → Cast cancelled/interrupted
+=============================================================================]]
+
+local function OnSpellFailedOther(casterGuid, spellId)
+  if not casterGuid then return end
+  -- Only cancel if we were actually tracking this cast
+  if activeCasts[casterGuid] then
+    activeCasts[casterGuid] = nil
+    RSA_CancelCast(casterGuid)
+  end
+end
+
+--[[===========================================================================
+  Initialization
+=============================================================================]]
+
+function RSA_NP:Initialize()
+  if not RSAConfig then return false end
+  if not GetNampowerVersion then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[RSA]|r Nampower not found!")
+    return false
+  end
+
+  if GetCVar("NP_EnableSpellGoEvents") ~= "1" then
+    SetCVar("NP_EnableSpellGoEvents", "1")
+  end
+
+  self.enabled = true
+
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("SPELL_GO_OTHER")
+  f:RegisterEvent("SPELL_START_OTHER")
+  f:RegisterEvent("SPELL_FAILED_OTHER")
+  f:RegisterEvent("BUFF_REMOVED_OTHER")
+  f:RegisterEvent("DEBUFF_ADDED_OTHER")
+  f:SetScript("OnEvent", function()
+    if not RSA_NP.enabled then return end
+    if event == "SPELL_GO_OTHER" then
+      OnSpellGoOther(arg2, arg1, arg3, arg4)
+    elseif event == "SPELL_START_OTHER" then
+      OnSpellStartOther(arg2, arg3, arg4, arg6)
+    elseif event == "SPELL_FAILED_OTHER" then
+      -- arg1=casterGuid, arg2=spellId
+      OnSpellFailedOther(arg1, arg2)
+    elseif event == "BUFF_REMOVED_OTHER" then
+      OnBuffRemovedOther(arg1, arg3)
+    elseif event == "DEBUFF_ADDED_OTHER" then
+      OnDebuffAddedOther(arg1, arg2, arg3)
+    end
+  end)
+
+  local a, b, c = GetNampowerVersion()
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[RSA]|r Nampower v%d.%d.%d active", a, b, c))
+  return true
+end
+
+function RSA_NP:Enable()
+  self.enabled = true
+end
+
+function RSA_NP:Disable()
+  self.enabled = false
+end
+
+--[[===========================================================================
+  Zone / Instance Events
+=============================================================================]]
+
+local zoneFrame = CreateFrame("Frame")
+zoneFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+zoneFrame:RegisterEvent("ZONE_CHANGED")
+zoneFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+zoneFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
+zoneFrame:SetScript("OnEvent", function()
+  RSA_NP:UpdateInstanceStatus()
 end)
-
---[[===========================================================================
-	Event Handler
-=============================================================================]]
-
-local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-eventFrame:RegisterEvent("UNIT_CASTEVENT")
-eventFrame:RegisterEvent("ZONE_CHANGED")
-eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-eventFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
-
-eventFrame:SetScript("OnEvent", function()
-	if not RSA_SW.enabled then return end
-	
-	if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED_INDOORS" then
-		RSA_SW:UpdateInstanceStatus()
-	elseif event == "UNIT_CASTEVENT" then
-		RSA_SW:OnUnitCastEvent(arg1, arg2, arg3, arg4, arg5)
-	end
-end)
-
---[[===========================================================================
-	UNIT_CASTEVENT Handler
-=============================================================================]]
-
-function RSA_SW:OnUnitCastEvent(casterGUID, targetGUID, eventType, spellID, castDuration)
-	if not spellID or not casterGUID then return end
-	
-	-- Handle FAIL event
-	if eventType == "FAIL" then
-		if RSA_AlertFrame and RSA_AlertFrame:IsVisible() and RSA_AlertFrame.isCasting then
-			if RSA_AlertFrame.trackingGUID == casterGUID then
-				RSA_AlertFrame.isCasting = false
-				RSA_AlertFrame.bar:SetWidth(0)
-				RSA_AlertFrame.timerText:SetText("")
-				
-				-- Check if we have active buffs to show instead of hiding
-				if RSA_AlertFrame.activeBuffs and next(RSA_AlertFrame.activeBuffs) ~= nil then
-					RSA_ShowNextBuff()
-				elseif RSA_MoveMode then
-					-- Im Move-Mode: Zurück zum Platzhalter
-					RSA_AlertFrame.text:SetText(">> DRAG TO MOVE <<")
-					RSA_AlertFrame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-					local textWidth = RSA_AlertFrame.text:GetStringWidth()
-					local frameWidth = math.max(180, textWidth + 80)
-					RSA_AlertFrame:SetWidth(frameWidth)
-					RSA_AlertFrame.bar:SetWidth(frameWidth)
-					RSA_AlertFrame.bar:SetVertexColor(0.5, 0.5, 0.5, RSA_AlertFrameBgAlpha or 0.7)
-				else
-					RSA_AlertFrame:Hide()
-				end
-			end
-		end
-		return
-	end
-	
-	if eventType ~= "START" and eventType ~= "CAST" then return end
-	if self.inInstance then return end
-	if not UnitIsPlayer(casterGUID) then return end
-	
-	local class = UnitClass(casterGUID)
-	if not class then return end
-	
-	local classification = UnitClassification(casterGUID)
-	if classification == "elite" or classification == "worldboss" or classification == "rare" or classification == "rareelite" then
-		return
-	end
-	
-	if not IsEnemy(casterGUID) then return end
-	
-	local casterName = UnitName(casterGUID) or "Unknown"
-	
-	-- Check item uses
-	local useConfigKey = RSA_USE_SPELL_IDS[spellID]
-	if useConfigKey then
-		if RSAConfig.use and RSAConfig.use.enabled and RSAConfig.use[useConfigKey] and CanAlert(casterGUID, useConfigKey, "use") then
-			RSA_PlaySoundFile(useConfigKey, casterName, casterGUID, nil, spellID)
-		end
-		return
-	end
-	
-	-- Check casts
-	local castConfigKey = RSA_CAST_SPELL_IDS[spellID]
-	if castConfigKey then
-		if eventType ~= "START" then return end
-		local _, playerGuid = UnitExists("player")
-		if targetGUID ~= playerGuid then return end
-		
-		if RSAConfig.casts.enabled and RSAConfig.casts[castConfigKey] then
-			-- Für Casts: Immer anzeigen wenn in Range, kein Cooldown-Check
-			if not distanceCheckAvailable or IsWithinRange(casterGUID, 50) then
-				RSA_PlaySoundFile(castConfigKey, casterName, casterGUID, castDuration, spellID)
-			end
-		end
-		return
-	end
-	
-	-- Check buffs
-	local buffConfigKey = RSA_BUFF_SPELL_IDS[spellID]
-	if buffConfigKey then
-		if RSAConfig.buffs.enabled and RSAConfig.buffs[buffConfigKey] and CanAlert(casterGUID, buffConfigKey, "buff") then
-			RSA_PlaySoundFile(buffConfigKey, casterName, casterGUID, nil, spellID)
-		end
-		
-		-- Add to fade watch list
-		if RSAConfig.fadingBuffs and RSAConfig.fadingBuffs.enabled and RSAConfig.fadingBuffs[buffConfigKey] then
-			if RSA_FADE_BUFF_PATTERNS[buffConfigKey] then
-				if not self.fadeWatchList[casterGUID] then
-					self.fadeWatchList[casterGUID] = {}
-				end
-				self.fadeWatchList[casterGUID][buffConfigKey] = {
-					playerName = casterName,
-					pattern = RSA_FADE_BUFF_PATTERNS[buffConfigKey],
-				}
-			end
-		end
-		return
-	end
-end
-
---[[===========================================================================
-	SuperWoW Initialization
-=============================================================================]]
-
-function RSA_SW:Initialize()
-	if not RSAConfig then return false end
-	
-	local hasSuperWoW = (GetPlayerBuffID ~= nil and CombatLogAdd ~= nil and SpellInfo ~= nil)
-	
-	if hasSuperWoW then
-		self.enabled = true
-		scanFrame:Show()
-		eventFrame:Show()
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[RSA]|r SuperWoW detected - Enhanced mode active!")
-		return true
-	end
-	return false
-end
-
-function RSA_SW:Enable()
-	if self.enabled then
-		scanFrame:Show()
-		eventFrame:Show()
-	end
-end
-
-function RSA_SW:Disable()
-	if self.enabled then
-		scanFrame:Hide()
-		eventFrame:Hide()
-	end
-end
