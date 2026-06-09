@@ -635,6 +635,43 @@ end)
 
 RSA_PlayerIcon = nil
 
+function RSA_SetPlayerIconShape(frame)
+	if not frame then return end
+
+	local shape = RSA_PortraitIconShape or "square"
+	local size = frame.baseSize or frame:GetWidth() or 52
+	frame:SetWidth(size)
+	frame:SetHeight(size)
+
+	if shape == "circle" then
+		-- Match ModernFocusFrame/DragonflightUI's approach: place the icon
+		-- under the unitframe art and let the existing circular portrait frame
+		-- hide the square corners. Do not draw our own minimap border.
+		if frame.parentFrame and frame.parentFrame.GetFrameLevel then
+			frame:SetFrameLevel(frame.parentFrame:GetFrameLevel())
+		end
+	else
+		if frame.parentFrame and frame.parentFrame.GetFrameLevel then
+			frame:SetFrameLevel(frame.parentFrame:GetFrameLevel() + 5)
+		end
+	end
+
+	if frame.icon then
+		frame.icon:ClearAllPoints()
+		frame.icon:SetAllPoints(frame)
+		if shape == "circle" then
+			frame.icon:SetDrawLayer("BORDER")
+		else
+			frame.icon:SetDrawLayer("OVERLAY")
+		end
+		frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	end
+
+	if frame.border then
+		frame.border:Hide()
+	end
+end
+
 function RSA_CreatePlayerFrameIcon()
 	if RSA_PlayerIcon then return end
 	
@@ -651,6 +688,8 @@ function RSA_CreatePlayerFrameIcon()
 	end
 	
 	local frame = CreateFrame("Frame", "RSA_PlayerFrameIcon", parentFrame)
+	frame.parentFrame = parentFrame
+	frame.baseSize = iconSize
 	frame:SetWidth(iconSize)
 	frame:SetHeight(iconSize)
 	frame:SetFrameLevel(parentFrame:GetFrameLevel() + 5)
@@ -660,7 +699,9 @@ function RSA_CreatePlayerFrameIcon()
 	frame.icon:SetAllPoints(frame)
 	frame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
 	frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-	
+
+	RSA_SetPlayerIconShape(frame)
+
 	frame.timer = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	frame.timer:SetPoint("CENTER", frame, "CENTER", 0, 0)
 	frame.timer:SetTextColor(0, 1, 0)

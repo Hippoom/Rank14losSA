@@ -59,32 +59,20 @@ RSA_BUFF_SPELL_IDS = {
 	[9821] = "Dash",
 	[12292] = "DeathWish",
 	[71] = "DefensiveStance",
-	[19236] = "DesperatePrayer",
-	[19238] = "DesperatePrayer",
-	[19240] = "DesperatePrayer",
-	[19241] = "DesperatePrayer",
-	[19242] = "DesperatePrayer",
-	[19243] = "DesperatePrayer",
 	[19296] = "Deterrence",
 	[20216] = "DivineFavor",
 	[642] = "DivineShield",
-	[2484] = "EarthbindTotem",
 	[16166] = "ElementalMastery",
 	[5277] = "Evasion",
 	[26669] = "Evasion",
-	[12051] = "Evocation",
 	[6346] = "FearWard",
 	[22842] = "FrenziedRegeneration",
 	[22895] = "FrenziedRegeneration",
 	[22896] = "FrenziedRegeneration",
-	[1499] = "FreezingTrap",
-	[8178] = "GroundingTotem",
 	[45438] = "IceBlock",
 	[14751] = "InnerFocus",
 	[29166] = "Innervate",
-	[19577] = "Intimidation",
 	[12975] = "LastStand",
-	[16190] = "ManaTideTotem",
 	[16689] = "Nature'sGrasp",
 	[16810] = "Nature'sGrasp",
 	[16811] = "Nature'sGrasp",
@@ -105,13 +93,6 @@ RSA_BUFF_SPELL_IDS = {
 	[11305] = "Sprint",
 	[20594] = "Stoneform",
 	[12328] = "SweepingStrikes",
-	[740] = "Tranquility",
-	[8918] = "Tranquility",
-	[9862] = "Tranquility",
-	[9863] = "Tranquility",
-	[8143] = "TremorTotem",
-	[23505] = "Trinket",
-	[52317] = "Trinket",  -- PvP Trinket - Turtle WoW
 	[7744] = "WilloftheForsaken",
 	[6615] = "FreeAction",
 }
@@ -124,6 +105,25 @@ RSA_USE_SPELL_IDS = {
 	[1768] = "Kick",
 	[1769] = "Kick",
 	[38768] = "Kick",
+	[19236] = "DesperatePrayer",
+	[19238] = "DesperatePrayer",
+	[19240] = "DesperatePrayer",
+	[19241] = "DesperatePrayer",
+	[19242] = "DesperatePrayer",
+	[19243] = "DesperatePrayer",
+	[2484] = "EarthbindTotem",
+	[12051] = "Evocation",
+	[1499] = "FreezingTrap",
+	[8178] = "GroundingTotem",
+	[19577] = "Intimidation",
+	[16190] = "ManaTideTotem",
+	[740] = "Tranquility",
+	[8918] = "Tranquility",
+	[9862] = "Tranquility",
+	[9863] = "Tranquility",
+	[8143] = "TremorTotem",
+	[23505] = "Trinket",
+	[52317] = "Trinket",  -- PvP Trinket - Turtle WoW
 	[19503] = "ScatterShot",
 	[2094] = "Blind",
 	[12809] = "ConcussionBlow",
@@ -236,21 +236,11 @@ RSA_NO_TIMER_BUFFS = {
 	["BerserkerStance"] = true,
 	["DefensiveStance"] = true,
 	["Cannibalize"] = true,
-	["DesperatePrayer"] = true,
-	["EarthbindTotem"] = true,
-	["Evocation"] = true,
 	["FearWard"] = true,
-	["FreezingTrap"] = true,
-	["GroundingTotem"] = true,
-	["Intimidation"] = true,
-	["ManaTideTotem"] = true,
 	["PowerInfusion"] = true,
 	["Reflector"] = true,
 	["Sacrifice"] = true,
 	["SweepingStrikes"] = true,
-	["Tranquility"] = true,
-	["TremorTotem"] = true,
-	["Trinket"] = true,
 }
 
 -- SpellID-based duration overrides
@@ -261,13 +251,13 @@ RSA_SPELLID_DURATIONS = {
 }
 
 -- Menu constants
-RSA_BUFF = 54
-RSA_CAST = 67
-RSA_DEBUFF = 83
-RSA_FADING = 92
+RSA_BUFF = 44
+RSA_CAST = 57
+RSA_DEBUFF = 73
+RSA_FADING = 102
 
-RSA_MENU_TEXT = { "Enabled", "Enabled outside of Battlegrounds", "Show Alert Frame", "Move Alert Frame", }
-RSA_MENU_SETS = { "enabled", "outside", "alertFrame", "moveAlert", }
+RSA_MENU_TEXT = { "Enabled", "Enabled outside of Battlegrounds", "Show Alert Frame", "Move Alert Frame", "Circular Portrait Icon", }
+RSA_MENU_SETS = { "enabled", "outside", "alertFrame", "moveAlert", "portraitIconShape", }
 
 RSA_MENU_WHITE = {}
 RSA_MENU_WHITE[1] = true
@@ -290,14 +280,12 @@ RSA_SOUND_OPTION_TEXT = {
 	"Adrenaline Rush", "Arcane Power", "Barkskin", "Battle Stance", "Berserker Rage",
 	"Berserker Stance", "Bestial Wrath", "Blade Flurry", "Blessing of Freedom",
 	"Blessing of Protection", "Cannibalize", "Cold Blood", "Combustion", "Dash",
-	"Death Wish", "Defensive Stance", "Desperate Prayer", "Deterrence", "Divine Favor",
-	"Divine Shield", "Earthbind Totem", "Elemental Mastery", "Evasion", "Evocation",
-	"Fear Ward", "First Aid", "Frenzied Regeneration", "Freezing Trap", "Grounding Totem",
-	"Ice Block", "Inner Focus", "Innervate", "Intimidation", "Last Stand",
-	"Mana Tide Totem", "Nature's Grasp", "Nature's Swiftness", "Power Infusion",
-	"Presence of Mind", "Rapid Fire", "Recklessness", "Reflector", "Retaliation",
-	"Sacrifice", "Shield Wall", "Sprint", "Stone form", "Sweeping Strikes",
-	"Tranquility", "Tremor Totem", "Trinket", "Will of the Forsaken", "Free Action",
+	"Death Wish", "Defensive Stance", "Deterrence", "Divine Favor",
+	"Divine Shield", "Elemental Mastery", "Evasion", "Fear Ward",
+	"Frenzied Regeneration", "Ice Block", "Inner Focus", "Innervate", "Last Stand",
+	"Nature's Grasp", "Nature's Swiftness", "Power Infusion", "Presence of Mind",
+	"Rapid Fire", "Recklessness", "Reflector", "Retaliation", "Sacrifice",
+	"Shield Wall", "Sprint", "Stone form", "Sweeping Strikes", "Will of the Forsaken", "Free Action",
 	"",
 	"When an enemy starts casting:",
 	"Entangling Roots", "Escape Artist", "Fear", "Hearthstone", "Hibernate",
@@ -317,5 +305,7 @@ RSA_SOUND_OPTION_TEXT = {
 	"Stoneform", "Will of the Forsaken", "Free Action",
 	"",
 	"When an enemy uses an ability:",
-	"Kick", "Flash Bomb",
+	"Kick", "Flash Bomb", "Desperate Prayer", "Earthbind Totem", "Evocation",
+	"Freezing Trap", "Grounding Totem", "Intimidation", "Mana Tide Totem",
+	"Tranquility", "Tremor Totem", "Trinket",
 }

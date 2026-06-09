@@ -64,18 +64,16 @@ function RSA_OnEvent(event)
 					["BestialWrath"] = true, ["BladeFlurry"] = true, ["BlessingofFreedom"] = true,
 					["BlessingofProtection"] = true, ["Cannibalize"] = true, ["ColdBlood"] = true,
 					["Combustion"] = true, ["Dash"] = true, ["DeathWish"] = true,
-					["DefensiveStance"] = false, ["DesperatePrayer"] = true, ["Deterrence"] = true,
-					["DivineFavor"] = true, ["DivineShield"] = true, ["EarthbindTotem"] = true,
-					["ElementalMastery"] = true, ["Evasion"] = true, ["Evocation"] = true,
-					["FearWard"] = true, ["FirstAid"] = true, ["FrenziedRegeneration"] = true,
-					["FreezingTrap"] = true, ["GroundingTotem"] = true, ["IceBlock"] = true,
-					["InnerFocus"] = true, ["Innervate"] = true, ["Intimidation"] = true,
-					["LastStand"] = true, ["ManaTideTotem"] = true, ["Nature'sGrasp"] = true,
+					["DefensiveStance"] = false, ["Deterrence"] = true,
+					["DivineFavor"] = true, ["DivineShield"] = true,
+					["ElementalMastery"] = true, ["Evasion"] = true,
+					["FearWard"] = true, ["FrenziedRegeneration"] = true,
+					["IceBlock"] = true, ["InnerFocus"] = true, ["Innervate"] = true,
+					["LastStand"] = true, ["Nature'sGrasp"] = true,
 					["Nature'sSwiftness"] = true, ["PowerInfusion"] = true, ["PresenceofMind"] = true,
 					["RapidFire"] = true, ["Recklessness"] = true, ["Reflector"] = true,
 					["Retaliation"] = true, ["Sacrifice"] = true, ["ShieldWall"] = true,
 					["Sprint"] = true, ["Stoneform"] = true, ["SweepingStrikes"] = true,
-					["Tranquility"] = true, ["TremorTotem"] = true, ["Trinket"] = true,
 					["WilloftheForsaken"] = true, ["FreeAction"] = true,
 				},
 				["casts"] = {
@@ -108,6 +106,11 @@ function RSA_OnEvent(event)
 				["use"] = {
 					["enabled"] = true,
 					["Kick"] = true, ["FlashBomb"] = true,
+					["DesperatePrayer"] = true, ["EarthbindTotem"] = true,
+					["Evocation"] = true, ["FreezingTrap"] = true,
+					["GroundingTotem"] = true, ["Intimidation"] = true,
+					["ManaTideTotem"] = true, ["Tranquility"] = true,
+					["TremorTotem"] = true, ["Trinket"] = true,
 				},
 			}
 		end
@@ -124,6 +127,20 @@ function RSA_OnEvent(event)
 			end
 		end
 		
+		-- Migrate existing configs: add new use entries
+		if RSAConfig.use then
+			local newUseAbilities = {
+				"DesperatePrayer", "EarthbindTotem", "Evocation", "FreezingTrap",
+				"GroundingTotem", "Intimidation", "ManaTideTotem", "Tranquility",
+				"TremorTotem", "Trinket",
+			}
+			for _, ability in ipairs(newUseAbilities) do
+				if RSAConfig.use[ability] == nil then
+					RSAConfig.use[ability] = true
+				end
+			end
+		end
+
 		-- Migrate existing configs: add new fadingBuffs entries
 		if RSAConfig.fadingBuffs then
 			local newFadingBuffs = {
@@ -143,9 +160,17 @@ function RSA_OnEvent(event)
 		RSA_NP:Initialize()
 		InitializeDistanceCheck()
 		
-		if RSA_AlertFrameEnabled == nil then RSA_AlertFrameEnabled = true end
+		if RSAConfig.alertFrame == nil then
+			if RSA_AlertFrameEnabled ~= nil then
+				RSAConfig.alertFrame = RSA_AlertFrameEnabled and true or false
+			else
+				RSAConfig.alertFrame = true
+			end
+		end
+		RSA_AlertFrameEnabled = RSAConfig.alertFrame and true or false
 		if RSA_AlertFrameBgAlpha == nil then RSA_AlertFrameBgAlpha = 0.7 end
-		
+		if RSA_PortraitIconShape == nil then RSA_PortraitIconShape = "square" end
+
 		RSA_CreateAlertFrame()
 		
 		if RSAConfig.enabled then
@@ -256,8 +281,30 @@ function RSA_SoundText(index)
 	if RSA_SOUND_OPTION_WHITE[index] then
 		return "enabled"
 	else
-		return string.gsub(RSA_SOUND_OPTION_TEXT[index], " ", "")
+		local text = RSA_SOUND_OPTION_TEXT[index]
+		if not text then return nil end
+		return string.gsub(text, " ", "")
 	end
+end
+
+function RSA_EnableCheckBox(button)
+	if OptionsFrame_EnableCheckBox then
+		OptionsFrame_EnableCheckBox(button)
+		return
+	end
+	button:Enable()
+	local fontString = _G[button:GetName().."Text"]
+	if fontString then fontString:SetTextColor(1, 1, 1) end
+end
+
+function RSA_DisableCheckBox(button)
+	if OptionsFrame_DisableCheckBox then
+		OptionsFrame_DisableCheckBox(button)
+		return
+	end
+	button:Disable()
+	local fontString = _G[button:GetName().."Text"]
+	if fontString then fontString:SetTextColor(0.5, 0.5, 0.5) end
 end
 
 --[[===========================================================================
@@ -287,16 +334,20 @@ function RSACheckButton_OnClick()
 				RSA_UpdateState()
 			end
 		elseif this.index == 3 then
-			RSA_AlertFrameEnabled = this:GetChecked()
+			RSAConfig.alertFrame = this:GetChecked() and true or false
+			RSA_AlertFrameEnabled = RSAConfig.alertFrame
 		elseif this.index == 4 then
 			RSA_ToggleMoveMode()
 			this:SetChecked(RSA_MoveMode)
+		elseif this.index == 5 then
+			RSA_PortraitIconShape = this:GetChecked() and "circle" or "square"
+			RSA_SetPlayerIconShape(RSA_PlayerIcon)
 		end
 	else
-		if this:GetChecked() then
-			RSAConfig[RSA_Subtable(this.index)][RSA_SoundText(this.index)] = true
-		else
-			RSAConfig[RSA_Subtable(this.index)][RSA_SoundText(this.index)] = false
+		local subtable = RSA_Subtable(this.index)
+		local soundText = RSA_SoundText(this.index)
+		if RSAConfig[subtable] and soundText then
+			RSAConfig[subtable][soundText] = this:GetChecked()
 		end
 		if RSA_SOUND_OPTION_WHITE[this.index] then
 			RSASoundOptionFrame_Update()
@@ -314,7 +365,7 @@ end
 
 function RSAMenuFrame_Update()
 	local button, fontString
-	for i=1,4 do
+	for i=1,5 do
 		fontString = _G["RSAMenuFrameButton"..i.."Text"]
 		fontString:SetText(RSA_MENU_TEXT[i])
 		button = _G["RSAMenuFrameButton"..i]
@@ -327,6 +378,8 @@ function RSAMenuFrame_Update()
 			button:SetChecked(RSA_AlertFrameEnabled)
 		elseif i == 4 then
 			button:SetChecked(RSA_MoveMode)
+		elseif i == 5 then
+			button:SetChecked(RSA_PortraitIconShape == "circle")
 		end
 		
 		if RSA_MENU_WHITE[i] then
@@ -338,7 +391,7 @@ function RSAMenuFrame_Update()
 		local slider = CreateFrame("Slider", "RSAAlphaSlider", RSAMenuFrame, "OptionsSliderTemplate")
 		slider:SetWidth(180)
 		slider:SetHeight(16)
-		slider:SetPoint("TOPLEFT", RSAMenuFrameButton4, "BOTTOMLEFT", 0, -15)
+		slider:SetPoint("TOPLEFT", RSAMenuFrameButton5, "BOTTOMLEFT", 0, -15)
 		slider:SetMinMaxValues(0, 100)
 		slider:SetValueStep(1)
 		
@@ -370,9 +423,9 @@ end
 
 function RSAMenuFrame_UpdateDependencies()
 	if RSAConfig.enabled then
-		OptionsFrame_EnableCheckBox(RSAMenuFrameButton2)
+		RSA_EnableCheckBox(RSAMenuFrameButton2)
 	else
-		OptionsFrame_DisableCheckBox(RSAMenuFrameButton2)
+		RSA_DisableCheckBox(RSAMenuFrameButton2)
 	end
 end
 
@@ -390,26 +443,30 @@ function RSASoundOptionFrame_Update()
 	for i=1,17 do
 		local index = offset + i
 		fontString = _G["RSASoundOptionFrameButton"..i.."Text"]
-		fontString:SetText(RSA_SOUND_OPTION_TEXT[index])
+		fontString:SetText(RSA_SOUND_OPTION_TEXT[index] or "")
 		
 		button = _G["RSASoundOptionFrameButton"..i]
 		button.index = index
 		
-		if RSA_SOUND_OPTION_NOBUTTON[index] then
+		local subtable = RSA_Subtable(index)
+		local config = RSAConfig[subtable]
+		local soundText = RSA_SoundText(index)
+
+		if RSA_SOUND_OPTION_NOBUTTON[index] or not config or not soundText then
 			button:Hide()
 		else
 			button:Show()
-			button:SetChecked(RSAConfig[RSA_Subtable(index)][RSA_SoundText(index)])
+			button:SetChecked(config[soundText])
 		end
-		
+
 		if RSA_SOUND_OPTION_WHITE[index] then
-			OptionsFrame_EnableCheckBox(button)
+			RSA_EnableCheckBox(button)
 			fontString:SetTextColor(1,1,1)
 		else
-			if RSAConfig[RSA_Subtable(index)]["enabled"] then
-				OptionsFrame_EnableCheckBox(button)
+			if config and config["enabled"] then
+				RSA_EnableCheckBox(button)
 			else
-				OptionsFrame_DisableCheckBox(button)
+				RSA_DisableCheckBox(button)
 			end
 		end
 	end
