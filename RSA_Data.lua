@@ -124,6 +124,10 @@ RSA_USE_SPELL_IDS = {
 	[8143] = "TremorTotem",
 	[23505] = "Trinket",
 	[52317] = "Trinket",  -- PvP Trinket - Turtle WoW
+}
+
+-- Debuff Spell IDs
+RSA_DEBUFF_SPELL_IDS = {
 	[19503] = "ScatterShot",
 	[2094] = "Blind",
 	[12809] = "ConcussionBlow",
@@ -146,6 +150,11 @@ RSA_USE_SPELL_IDS = {
 	[19386] = "WyvernSting",
 	[24132] = "WyvernSting",
 	[24133] = "WyvernSting",
+	[18469] = "Counterspell-Silenced",
+	[20066] = "Repetance",
+	[6358] = "Seduction",
+	[6359] = "Seduction",
+	[20407] = "Seduction",
 }
 
 -- Debuff name mappings
